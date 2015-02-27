@@ -235,17 +235,15 @@ tmat</code></pre>
                          <span class="dt">Mstate =</span> <span class="ot">TRUE</span>,
                          <span class="dt">data.Mstate =</span> data_mstate,
                          <span class="dt">ID.Mstate =</span> <span class="st">&quot;id&quot;</span>,
-                         <span class="dt">control =</span> <span class="kw">list</span>(<span class="dt">GHk =</span> <span class="dv">3</span>, <span class="dt">lng.in.kn =</span> <span class="dv">3</span>, <span class="dt">iter.EM=</span><span class="dv">0</span>, <span class="dt">only.EM =</span> T))</code></pre>
-<pre><code>## Warning in JMstateModel(lmeObject = lmeFit, survObject = coxFit, timeVar = &quot;times&quot;, : Hessian matrix at convergence is not positive definite.</code></pre>
-<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">summary</span>(jointFit)</code></pre>
-<pre><code>## Warning in sqrt(diag(VarCov[indT, indT])): production de NaN</code></pre>
+                         <span class="dt">control =</span> <span class="kw">list</span>(<span class="dt">GHk =</span> <span class="dv">3</span>, <span class="dt">lng.in.kn =</span> <span class="dv">3</span>))
+<span class="kw">summary</span>(jointFit)</code></pre>
 <pre><code>## 
 ## Call:
 ## JMstateModel(lmeObject = lmeFit, survObject = coxFit, timeVar = &quot;times&quot;, 
 ##     parameterization = &quot;both&quot;, method = &quot;spline-PH-aGH&quot;, interFact = list(value = ~strata(trans) - 
 ##         1, slope = ~strata(trans) - 1, data = data_mstate), derivForm = dForm, 
-##     control = list(GHk = 3, lng.in.kn = 3, iter.EM = 0, only.EM = T), 
-##     Mstate = TRUE, data.Mstate = data_mstate, ID.Mstate = &quot;id&quot;)
+##     control = list(GHk = 3, lng.in.kn = 3), Mstate = TRUE, data.Mstate = data_mstate, 
+##     ID.Mstate = &quot;id&quot;)
 ## 
 ## Data Descriptives:
 ## Longitudinal Process     Event Process
@@ -259,61 +257,61 @@ tmat</code></pre>
 ## Parameterization: Time-dependent + time-dependent slope 
 ## 
 ##    log.Lik      AIC      BIC
-##  -13004.44 26084.88 26245.04
+##  -11024.28 22124.56 22284.72
 ## 
 ## Variance Components:
 ##              StdDev    Corr
-## (Intercept)  0.5813  (Intr)
-## times        0.2313 -0.2970
-## Residual     0.4800        
+## (Intercept)  0.5796  (Intr)
+## times        0.2357 -0.2989
+## Residual     0.4797        
 ## 
 ## Coefficients:
 ## Longitudinal Process
 ##               Value Std.Err z-value p-value
-## (Intercept) -0.7965  0.0822 -9.6882 &lt;0.0001
-## times       -0.0613  0.0196 -3.1307  0.0017
-## X            0.5516  0.0375 14.7094 &lt;0.0001
-## times:X      0.0020  0.0077  0.2644  0.7915
+## (Intercept) -0.8013  0.0842 -9.5127 &lt;0.0001
+## times       -0.0567  0.0243 -2.3321  0.0197
+## X            0.5498  0.0390 14.1123 &lt;0.0001
+## times:X      0.0025  0.0114  0.2163  0.8288
 ## 
 ## Event Process
-##                                  Value   Std.Err  z-value p-value
-## X.1                             0.3085    0.1902   1.6214  0.1049
-## X.2                            -0.5139    0.1688  -3.0439  0.0023
-## X.3                             0.2197    3.4767   0.0632  0.9496
-## Assoct:strata(trans)trans=1     0.4537    0.1735   2.6149  0.0089
-## Assoct:strata(trans)trans=2     1.0024    0.2879   3.4811  0.0005
-## Assoct:strata(trans)trans=3    -0.0863       NaN      NaN     NaN
-## Assoct.s:strata(trans)trans=1   2.4250    0.5327   4.5524 &lt;0.0001
-## Assoct.s:strata(trans)trans=2  -8.8447    0.6227 -14.2044 &lt;0.0001
-## Assoct.s:strata(trans)trans=3   1.7129       NaN      NaN     NaN
-## bs1(trans=1)                   -2.9664    0.4726  -6.2764 &lt;0.0001
-## bs2(trans=1)                   -5.1952    0.7444  -6.9792 &lt;0.0001
-## bs3(trans=1)                   -5.6866    1.1336  -5.0163 &lt;0.0001
-## bs4(trans=1)                   -6.3690    1.4274  -4.4618 &lt;0.0001
-## bs5(trans=1)                   -6.7976    5.2137  -1.3038  0.1923
-## bs6(trans=1)                   -7.1080   17.6313  -0.4031  0.6868
-## bs7(trans=1)                   -7.2068   55.4752  -0.1299  0.8966
-## bs1(trans=2)                   -1.0982    0.2977  -3.6892  0.0002
-## bs2(trans=2)                   -7.7082    0.9265  -8.3197 &lt;0.0001
-## bs3(trans=2)                   -9.1657    4.7150  -1.9439  0.0519
-## bs4(trans=2)                  -11.1895   15.2506  -0.7337  0.4631
-## bs5(trans=2)                  -12.4608  103.2860  -0.1206  0.9040
-## bs6(trans=2)                  -13.3814  503.6474  -0.0266  0.9788
-## bs7(trans=2)                  -13.6743 2215.7543  -0.0062  0.9951
-## bs1(trans=3)                   -3.2667   13.8821  -0.2353  0.8140
-## bs2(trans=3)                   -6.5660   16.1408  -0.4068  0.6842
-## bs3(trans=3)                   -8.4451   17.1348  -0.4929  0.6221
-## bs4(trans=3)                   -9.7799   16.0602  -0.6090  0.5426
-## bs5(trans=3)                  -10.9629   45.1371  -0.2429  0.8081
-## bs6(trans=3)                  -11.5107  139.8777  -0.0823  0.9344
-## bs7(trans=3)                  -11.8892  369.2523  -0.0322  0.9743
+##                                 Value Std.Err z-value p-value
+## X.1                            0.0842  0.1635  0.5150  0.6065
+## X.2                           -0.1413  0.1702 -0.8301  0.4065
+## X.3                            0.2078  0.1921  1.0819  0.2793
+## Assoct:strata(trans)trans=1    0.8926  0.1504  5.9364 &lt;0.0001
+## Assoct:strata(trans)trans=2    0.3532  0.1333  2.6506  0.0080
+## Assoct:strata(trans)trans=3    0.0040  0.1210  0.0327  0.9739
+## Assoct.s:strata(trans)trans=1  2.2732  0.8630  2.6341  0.0084
+## Assoct.s:strata(trans)trans=2 -1.0054  1.2640 -0.7954  0.4264
+## Assoct.s:strata(trans)trans=3  0.4814  1.4834  0.3245  0.7455
+## bs1(trans=1)                  -7.8679  1.1355 -6.9293 &lt;0.0001
+## bs2(trans=1)                  -3.2550  0.8566 -3.7997  0.0001
+## bs3(trans=1)                  -4.5696  0.6664 -6.8571 &lt;0.0001
+## bs4(trans=1)                  -3.3702  0.5617 -5.9997 &lt;0.0001
+## bs5(trans=1)                  -2.1798  1.2210 -1.7852  0.0742
+## bs6(trans=1)                  -1.6088  3.6411 -0.4419  0.6586
+## bs7(trans=1)                  -4.4454 13.3149 -0.3339  0.7385
+## bs1(trans=2)                  -9.5182  3.1762 -2.9967  0.0027
+## bs2(trans=2)                  -5.1748  1.5813 -3.2726  0.0011
+## bs3(trans=2)                  -4.2310  0.8624 -4.9059 &lt;0.0001
+## bs4(trans=2)                  -2.4584  0.5313 -4.6269 &lt;0.0001
+## bs5(trans=2)                  -1.1470  0.7617 -1.5059  0.1321
+## bs6(trans=2)                  -0.5233  1.1179 -0.4681  0.6397
+## bs7(trans=2)                   2.2646  1.4881  1.5218  0.1281
+## bs1(trans=3)                  -4.3025  7.1580 -0.6011  0.5478
+## bs2(trans=3)                  -4.0242  2.3582 -1.7064  0.0879
+## bs3(trans=3)                  -2.7911  1.1471 -2.4332  0.0150
+## bs4(trans=3)                  -3.2228  0.7048 -4.5724 &lt;0.0001
+## bs5(trans=3)                  -0.5539  0.9143 -0.6059  0.5446
+## bs6(trans=3)                  -3.2461  1.5423 -2.1047  0.0353
+## bs7(trans=3)                   2.6854  2.1525  1.2476  0.2122
 ## 
 ## Integration:
 ## method: (pseudo) adaptive Gauss-Hermite
 ## quadrature points: 3 
 ## 
 ## Optimization:
-## Convergence: 1</code></pre>
+## Convergence: 0</code></pre>
 </div>
 
 

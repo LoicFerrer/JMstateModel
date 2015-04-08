@@ -72,7 +72,7 @@ JMstateModel <-
     if (CompRisk && Mstate) { # added
       stop("\nyou must choose between a joint model with competing risks or a joint multi-state model.")
     }
-    #### Survival sub-part ####
+    #### Survival/Multi-state sub-part ####
     formT <- formula(survObject)
     if (inherits(survObject, "coxph")) {
       W <- survObject$x

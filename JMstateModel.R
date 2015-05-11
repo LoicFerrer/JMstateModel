@@ -168,9 +168,7 @@ JMstateModel <-
     if (!timeVar %in% names(data)) 
       stop("\n'timeVar' does not correspond to one of the columns in the model.frame of 'lmeObject'.")
     max.timeY <- tapply(data[[timeVar]], id, max)
-    max.timeT <- 
-      if(!Mstate) { tapply(Time, idT, max) } # added
-    else { tapply(Time, idT, min) } # added
+    max.timeT <- tapply(Time, idT, max)
     if (!all(max.timeT >= max.timeY)) {
       idnams <- factor(lmeObject$groups[[1]])
       stop("\nit seems that there are longitudinal measurements taken after the event times for some subjects ", 

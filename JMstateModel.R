@@ -1,7 +1,7 @@
 # Description: 'JMstateModel' extends the 'jointModel' function (JM package) of Dimitris Rizopoulos.
 # It permits to fit a joint model for a longitudinal process and a multi-state process.
 # Author: Loïc Ferrer
-# Date: November 19, 2015
+# Date: January 15, 2016
 
 JMstateModel <-
   function (lmeObject, survObject, timeVar, 
@@ -9,13 +9,14 @@ JMstateModel <-
             method = c("weibull-PH-aGH", "weibull-PH-GH", "weibull-AFT-aGH", "weibull-AFT-GH", "piecewise-PH-aGH", 
                        "piecewise-PH-GH", "Cox-PH-aGH", "Cox-PH-GH", "spline-PH-aGH", "spline-PH-GH", "ch-Laplace"),
             interFact = NULL, derivForm = NULL, lag = 0, scaleWB = NULL, CompRisk = FALSE, init = NULL, control = list(),
-            Mstate = FALSE, data.Mstate = NULL, ID.Mstate = NULL,
+            Mstate = FALSE, data.Mstate = NULL, ID.Mstate = NULL, init.type.ranef = "mean",
             # 'Mstate' is TRUE when a joint multi-state model is fitted
             # 'data.Mstate' is the database used in 'coxph'
             # 'ID.Mstate' is the column name of the id in 'data.Mstate' (class(ID.Mstate)=="character")
             # 'init" may be a 'jointModel' object
+            # 'init.type.ranef' is the type of posterior random effects used in the computation of the integral over the random effects
             ...) 
-  {
+{
     cl <- match.call()
     #### Errors message ####
     if (!inherits(lmeObject, "lme")) 
@@ -123,7 +124,7 @@ JMstateModel <-
     }
     nT <- length(unique(idT))
     if (LongFormat && is.null(survObject$model$cluster) && !Mstate ) # added
-        stop("\nuse argument 'model = TRUE' and cluster() in coxph().")
+      stop("\nuse argument 'model = TRUE' and cluster() in coxph().")
     if (!length(W)) 
       W <- NULL
     if (sum(d) < 5) 
@@ -147,13 +148,19 @@ JMstateModel <-
     }
     #### Longitudinal sub-part ####
     id <- as.vector(unclass(lmeObject$groups[[1]]))
-    b <- if (class(init) == "jointModel") data.matrix(ranef(init)) # added
+    b <- if (class(init) == "jointModel") { # added
+      if (init.type.ranef == "mean")
+        data.matrix(ranef(init, type = "mean"))
+      else if (init.type.ranef == "mode") 
+        data.matrix(modified.ranef.jointModel(init, type = "mode"))
+      else stop("\n'init.type.ranef' must be 'mean' or 'mode'.")
+    } 
     else data.matrix(ranef(lmeObject))
     dimnames(b) <- NULL
     nY <- nrow(b)
-      if (nY != nT) 
-        stop("sample sizes in the longitudinal and event processes differ; ", 
-             "maybe you forgot the cluster() argument.\n")
+    if (nY != nT) 
+      stop("sample sizes in the longitudinal and event processes differ; ", 
+           "maybe you forgot the cluster() argument.\n")
     if (class(init) == "jointModel") { # added
       init.object <- init
       init <- init$coefficients
@@ -288,7 +295,7 @@ JMstateModel <-
                   value = c(x, list(Xs = Xs, Zs = Zs)),
                   slope = c(x, list(Xs.deriv = Xs.deriv, Zs.deriv = Zs.deriv)),
                   both = c(x, list(Xs.deriv = Xs.deriv, Zs.deriv = Zs.deriv, Xs = Xs, Zs = Zs)))
-    #### method == "spline-PH-GH" || method == "spline-PH-Laplace" ####    
+      #### method == "spline-PH-GH" || method == "spline-PH-Laplace" ####    
       if (method == "spline-PH-GH" || method == "spline-PH-Laplace") {
         strt <- if (is.null(survObject$strata)) 
           gl(1, length(Time))
@@ -458,9 +465,9 @@ JMstateModel <-
     }
     #### Out ####
     if (class(init.object) == "jointModel" &&
-        (!identical(X, init.object$x$X) | !identical(Z, init.object$x$Z) |
-         !identical(W, init.object$x$W) | !identical(round(W2, 6), round(init.object$x$W2, 6)) |
-         !identical(WintF.vl, init.object$x$WintF.vl) | !identical(WintF.sl, init.object$x$WintF.sl)))
+          (!identical(X, init.object$x$X) | !identical(Z, init.object$x$Z) |
+             !identical(W, init.object$x$W) | !identical(round(W2, 6), round(init.object$x$W2, 6)) |
+             !identical(WintF.vl, init.object$x$WintF.vl) | !identical(WintF.sl, init.object$x$WintF.sl)))
       stop ("The model in 'init' must be the same. Please use the same data, formulas and names of variables.")
     VC <- if (class(init.object) == "jointModel") {
       ncz <- ncol(Z)
@@ -483,7 +490,7 @@ JMstateModel <-
           Ys <- as.vector(init.object$x$Xs %*% init$betas + rowSums(init.object$x$Zs * b[idT.GK, ]))
           eta.t <- eta.tw2 + eta.tw1 + c(WintF.vl %*% init$alpha) * Y
           eta.s <- c(init.object$x$Ws.intF.vl %*% init$alpha) * Ys
-          }
+        }
         if (parameterization %in% c("slope", "both")) {
           Y.deriv <- as.vector(Xtime.deriv %*% init$betas[init.object$derivForm$indFixed]) +
             if (length(init.object$derivForm$indRandom) > 1) init.object$EB$Ztimeb.deriv
@@ -498,7 +505,7 @@ JMstateModel <-
           eta.s <- if (parameterization %in% "both") 
             eta.s + c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
           else c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
-          }
+        }
         if (parameterization %in% c("value", "both"))
           Ws.intF.vl.alpha <- c(init.object$x$Ws.intF.vl %*% init$alpha)
         if (parameterization %in% c("slope", "both"))
@@ -581,7 +588,7 @@ JMstateModel <-
                                      LongFormat = CompRisk | Mstate | length(Time) > nT) # added
       
       if (method == "Cox-PH-GH" && length(init.surv$lambda0) < 
-          length(unqT)) 
+            length(unqT)) 
         init.surv$lambda0 <- basehaz(survObject)$hazard
       initial.values <- c(list(betas = fixef(lmeObject), sigma = lmeObject$sigma, D = VC), init.surv)
       if (!is.null(init)) {

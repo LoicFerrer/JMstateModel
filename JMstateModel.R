@@ -1,22 +1,22 @@
-# Description: 'JMstateModel' extends the 'jointModel' function (JM package) of Dimitris Rizopoulos.
-# It permits to fit a joint model for a longitudinal process and a multi-state process.
-# Author: Loïc Ferrer
-# Date: January 15, 2016
-
-JMstateModel <-
+JMstateModel <- 
   function (lmeObject, survObject, timeVar, 
             parameterization = c("value", "slope", "both"), 
             method = c("weibull-PH-aGH", "weibull-PH-GH", "weibull-AFT-aGH", "weibull-AFT-GH", "piecewise-PH-aGH", 
                        "piecewise-PH-GH", "Cox-PH-aGH", "Cox-PH-GH", "spline-PH-aGH", "spline-PH-GH", "ch-Laplace"),
             interFact = NULL, derivForm = NULL, lag = 0, scaleWB = NULL, CompRisk = FALSE, init = NULL, control = list(),
-            Mstate = FALSE, data.Mstate = NULL, ID.Mstate = NULL, init.type.ranef = "mean",
+            Mstate = FALSE, data.Mstate = NULL, ID.Mstate = NULL, init.type.ranef = "mean", b.postVar.opt = FALSE,
+            transform.value = NULL, gr.transform.value = NULL, H.transform.value = NULL,
             # 'Mstate' is TRUE when a joint multi-state model is fitted
             # 'data.Mstate' is the database used in 'coxph'
             # 'ID.Mstate' is the column name of the id in 'data.Mstate' (class(ID.Mstate)=="character")
             # 'init" may be a 'jointModel' object
             # 'init.type.ranef' is the type of posterior random effects used in the computation of the integral over the random effects
+            # 'b.postVar.opt' specifies if the hessian of the posterior individual random effects must be computed analytically ("FALSE") or not ("TRUE" --> optim)
+            # 'transform.value' is the transformation function of the true current marker value which is considered in the dependence function
+            # 'gr.transform.value' is the derivative of the transformation function --> function with, in order: arugments x (fixed effects) and y (true current level)
+            # 'H.transform.value' is the second derivative of the transformation function --> function with, in order: arugments x (fixed effects) and y (true current level)
             ...) 
-{
+  {
     cl <- match.call()
     #### Errors message ####
     if (!inherits(lmeObject, "lme")) 
@@ -59,22 +59,36 @@ JMstateModel <-
     if (!is.null(interFact) && method %in% c("Cox-PH-GH", "ch-Laplace")) {
       stop("\nincluding interaction terms is not currently available for methods 'Cox-PH-GH' & 'ch-Laplace'.")
     }
-    if ((CompRisk || Mstate) && (method != "spline-PH-GH" || is.null(survObject$strata))) { # added
+    if ((CompRisk || Mstate) && (method != "spline-PH-GH" || is.null(survObject$strata))) {
       stop("\nto fit a competing risks or joint multi-state model you must choose as method 'spline-PH-GH'", 
            " and include a strata() in the specification of the coxph().")
     }
-    if (Mstate && (!is.null(survObject$cluster))) { # added
+    if (Mstate && (!is.null(survObject$cluster))) {
       stop("\nto fit a multi-state model with coxph(), you can not use time-dependent covariate.",
            "Thus, do not use 'cluster()' in coxph().")
     }
-    if (Mstate && (is.null(ID.Mstate) || !is.vector(data.Mstate[, ID.Mstate]) || is.null(data.Mstate))) { # added
+    if (Mstate && (is.null(ID.Mstate) || !is.vector(data.Mstate[, ID.Mstate]) || is.null(data.Mstate))) {
       stop("\nwhen Mstate is TRUE, you must specify data.Mstate and ID.Mstate",
            " which respectively correspond to the databased used in coxph() and the column name of the id in data.Mstate.")
     }
-    if (CompRisk && Mstate) { # added
+    if (CompRisk && Mstate) {
       stop("\nyou must choose between a joint model with competing risks or a joint multi-state model.")
     }
-    #### Survival/Multi-state sub-part ####
+    if (!is.null(transform.value) && !is.function(transform.value))
+      stop("\nthe 'transform.value' argument must be a function.")
+    if (!is.null(transform.value) && (method != "spline-PH-GH"))
+      stop("\nto use the 'transform.value' argument, you must choose as method 'spline-PH-GH'.")
+    if (!is.null(transform.value) && is.null(gr.transform.value))
+      stop("\nwhen you use the 'transform.value' argument, you must define the derivative in 'gr.transform.value'.")
+    if (!is.null(gr.transform.value) && !is.function(gr.transform.value))
+      stop("\nthe 'gr.transform.value' argument must be a function.")
+    if (!is.null(transform.value) && is.null(H.transform.value))
+      stop("\nwhen you use the 'transform.value' argument, you must define the second derivative in 'H.transform.value'.")
+    if (!is.null(H.transform.value) && !is.function(H.transform.value))
+      stop("\nthe 'H.transform.value' argument must be a function.")
+    if ((b.postVar.opt && class(init) != "jointModel") | (b.postVar.opt && init.type.ranef != "mode"))
+      stop("\n'b.postVar.opt' can be TRUE only when 'class(init) == 'jointModel'' and 'init.type.ranef == 'mode''.")
+    #### Event history sub-part ####
     formT <- formula(survObject)
     if (inherits(survObject, "coxph")) {
       W <- survObject$x
@@ -104,13 +118,13 @@ JMstateModel <-
         as.vector(unclass(survObject$model$cluster))
       }
       else {
-        if (!Mstate) { # added
+        if (!Mstate) {
           if(!CompRisk) {
             seq_along(Time)
           }
           else { rep(seq_len(length(Time)/nRisks), each = nRisks) }
         }
-        else { data.Mstate[, ID.Mstate] } # added
+        else { data.Mstate[, ID.Mstate] }
       }
       idT <- match(idT, unique(idT))
     }
@@ -123,7 +137,7 @@ JMstateModel <-
       nRisks <- 1
     }
     nT <- length(unique(idT))
-    if (LongFormat && is.null(survObject$model$cluster) && !Mstate ) # added
+    if (LongFormat && is.null(survObject$model$cluster) && !Mstate )
       stop("\nuse argument 'model = TRUE' and cluster() in coxph().")
     if (!length(W)) 
       W <- NULL
@@ -132,14 +146,14 @@ JMstateModel <-
     WintF.vl <- WintF.sl <- as.matrix(rep(1, length(Time)))
     if (!is.null(interFact)) {
       if (!is.null(interFact$value)) 
-        WintF.vl <- if (is.null(survObject$model) || !is.null(interFact$data)) { # added
+        WintF.vl <- if (is.null(survObject$model) || !is.null(interFact$data)) {
           model.matrix(interFact$value, data = interFact$data)
         }
       else {
         model.matrix(interFact$value, data = survObject$model)
       }
       if (!is.null(interFact$slope)) 
-        WintF.sl <- if (is.null(survObject$model) || !is.null(interFact$data)) { # added
+        WintF.sl <- if (is.null(survObject$model) || !is.null(interFact$data)) {
           model.matrix(interFact$slope, data = interFact$data)
         }
       else {
@@ -148,11 +162,18 @@ JMstateModel <-
     }
     #### Longitudinal sub-part ####
     id <- as.vector(unclass(lmeObject$groups[[1]]))
-    b <- if (class(init) == "jointModel") { # added
+    b <- if (class(init) == "jointModel") {
       if (init.type.ranef == "mean")
         data.matrix(ranef(init, type = "mean"))
-      else if (init.type.ranef == "mode") 
-        data.matrix(modified.ranef.jointModel(init, type = "mode"))
+      else if (init.type.ranef == "mode") {
+        if (b.postVar.opt == FALSE)
+          data.matrix(modified.ranef.jointModel(init, type = "mode"))
+        else {
+          b <- modified.ranef.jointModel(init, type = "mode", postVar = TRUE)
+          b.postVar <- attr(b, "postVar")
+          data.matrix(b)
+        }
+      }
       else stop("\n'init.type.ranef' must be 'mean' or 'mode'.")
     } 
     else data.matrix(ranef(lmeObject))
@@ -161,7 +182,7 @@ JMstateModel <-
     if (nY != nT) 
       stop("sample sizes in the longitudinal and event processes differ; ", 
            "maybe you forgot the cluster() argument.\n")
-    if (class(init) == "jointModel") { # added
+    if (class(init) == "jointModel") {
       init.object <- init
       init <- init$coefficients
     }
@@ -185,7 +206,7 @@ JMstateModel <-
     max.timeT <- tapply(Time, idT, max)
     if (!all(max.timeT >= max.timeY)) {
       idnams <- factor(lmeObject$groups[[1]])
-      stop("\nit seems that there are longitudinal measurements taken after the event times for some subjects ", 
+      stop("\nit seems that there are longitudinal measurements taken after the event times for some subjects ",
            "(i.e., check subject(s): ", paste(levels(idnams)[(max.timeT < max.timeY)], collapse = ", "), ").")
     }
     data.id[[timeVar]] <- pmax(Time - lag, 0)
@@ -228,7 +249,7 @@ JMstateModel <-
     ind.noadapt <- method. %in% c("weibull-AFT-GH", "weibull-PH-GH", "piecewise-PH-GH", "Cox-PH-GH", "spline-PH-GH")
     con <- list(only.EM = FALSE, iter.EM = if (method == "spline-PH-GH") 120 else 50, 
                 iter.qN = 350, optimizer = "optim", tol1 = 0.001, tol2 = 1e-04, 
-                tol3 = if (!CompRisk | !Mstate) sqrt(.Machine$double.eps) else 1e-09, # added
+                tol3 = if (!CompRisk | !Mstate) sqrt(.Machine$double.eps) else 1e-09,
                 numeriDeriv = "fd", eps.Hes = 1e-06, parscale = NULL, 
                 step.max = 0.1, backtrackSteps = 2, knots = NULL, ObsTimes.knots = TRUE, 
                 lng.in.kn = if (method == "piecewise-PH-GH") 6 else 5, 
@@ -303,10 +324,10 @@ JMstateModel <-
         nstrt <- length(levels(strt))
         split.Time <- split(Time, strt)
         ind.t <- if (LongFormat) {
-          if(!Mstate){ # added
+          if(!Mstate){
             unlist(tapply(idT, idT, function(x) c(rep(FALSE, length(x) - 1), TRUE)))
           }
-          else { unlist(tapply(idT, idT, function(x) c(as.logical(data.Mstate[data.Mstate[, ID.Mstate] %in% x, "status"])))) } # added
+          else { unlist(tapply(idT, idT, function(x) c(as.logical(data.Mstate[data.Mstate[, ID.Mstate] %in% x, "status"])))) }
         }
         else {
           rep(TRUE, length(Time))
@@ -326,11 +347,11 @@ JMstateModel <-
           rr
         }
         else {
-          spt <- if (length(Time) > nT & !CompRisk & !Mstate) # added
+          spt <- if (length(Time) > nT & !CompRisk & !Mstate)
             mapply(function(x, y) {
               x[unlist(tapply(y, y, function(z) c(rep(FALSE, length(z) - 1), TRUE)))]
             }, split.Time, split(idT, strt), SIMPLIFY = FALSE)
-          else mapply(function(x, y) {x[y]}, split.Time, split(ind.t, strt)) # added
+          else mapply(function(x, y) {x[y]}, split.Time, split(ind.t, strt))
           lapply(spt, function(t) {
             kk <- if (is.null(con$knots)) {
               pp <- seq(0, 1, length.out = con$lng.in.kn + 2)
@@ -371,7 +392,7 @@ JMstateModel <-
         x <- c(x, list(W2 = W2, W2s = W2s))
       }
     }
-    if (method == "piecewise-PH-GH") {
+    if (method == "piecewise-PH-GH") { 
       wk <- JM:::gaussKronrod(con$GKk)$wk
       sk <- JM:::gaussKronrod(con$GKk)$sk
       nk <- length(sk)
@@ -465,9 +486,9 @@ JMstateModel <-
     }
     #### Out ####
     if (class(init.object) == "jointModel" &&
-          (!identical(X, init.object$x$X) | !identical(Z, init.object$x$Z) |
-             !identical(W, init.object$x$W) | !identical(round(W2, 6), round(init.object$x$W2, 6)) |
-             !identical(WintF.vl, init.object$x$WintF.vl) | !identical(WintF.sl, init.object$x$WintF.sl)))
+        (!identical(X, init.object$x$X) | !identical(Z, init.object$x$Z) |
+         !identical(W, init.object$x$W) | !identical(round(W2, 6), round(init.object$x$W2, 6)) |
+         !identical(WintF.vl, init.object$x$WintF.vl) | !identical(WintF.sl, init.object$x$WintF.sl)))
       stop ("The model in 'init' must be the same. Please use the same data, formulas and names of variables.")
     VC <- if (class(init.object) == "jointModel") {
       ncz <- ncol(Z)
@@ -475,104 +496,184 @@ JMstateModel <-
     }
     else lapply(pdMatrix(lmeObject$modelStruct$reStruct), "*", lmeObject$sigma^2)[[1]]
     if (con$typeGH != "simple") {
-      Vs <- vector("list", nY)
-      inv.VC <- solve(VC)
-      if (class(init.object) == "jointModel") { ## added from here ...
-        idT.GK <- rep(idT, each = init.object$control$GKk)
-        eta.yx <- as.vector(X %*% init$betas)
-        eta.tw1 <- if (!is.null(W)) 
-          as.vector(W %*% init$gammas)
-        else rep(0, length(init.object$y$logT))
-        eta.tw2 <- as.vector(W2 %*% init$gammas.bs)
-        eta.ws <- as.vector(init.object$x$W2s %*% init$gammas.bs)
-        if (parameterization %in% c("value", "both")) {
-          Y <- as.vector(Xtime %*% init$betas + init.object$EB$Ztimeb)
-          Ys <- as.vector(init.object$x$Xs %*% init$betas + rowSums(init.object$x$Zs * b[idT.GK, ]))
-          eta.t <- eta.tw2 + eta.tw1 + c(WintF.vl %*% init$alpha) * Y
-          eta.s <- c(init.object$x$Ws.intF.vl %*% init$alpha) * Ys
-        }
-        if (parameterization %in% c("slope", "both")) {
-          Y.deriv <- as.vector(Xtime.deriv %*% init$betas[init.object$derivForm$indFixed]) +
-            if (length(init.object$derivForm$indRandom) > 1) init.object$EB$Ztimeb.deriv
-          else 0
-          Ys.deriv <- as.vector(init.object$x$Xs.deriv %*% init$betas[init.object$derivForm$indFixed]) +
-            if (length(init.object$derivForm$indRandom) > 1) 
-              as.vector(rowSums(init.object$x$Zs.deriv * b[idT.GK, init.object$derivForm$indRandom, drop = FALSE]))
-          else 0
-          eta.t <- if (parameterization %in% "both") 
-            eta.t + c(init.object$x$WintF.sl %*% init$Dalpha) * Y.deriv
-          else eta.tw2 + eta.tw1 + c(init.object$x$WintF.sl %*% init$Dalpha) * Y.deriv
-          eta.s <- if (parameterization %in% "both") 
-            eta.s + c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
-          else c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
-        }
-        if (parameterization %in% c("value", "both"))
-          Ws.intF.vl.alpha <- c(init.object$x$Ws.intF.vl %*% init$alpha)
-        if (parameterization %in% c("slope", "both"))
-          Ws.intF.sl.Dalpha <- c(init.object$x$Ws.intF.sl %*% init$Dalpha)
-        Zs.deriv.full <- matrix(0, nrow(init.object$x$Zs), ncol(init.object$x$Zs))
-        Zs.deriv.full[ , init.object$derivForm$indRandom] <- init.object$x$Zs.deriv
-      } ## (...) to here
-      for (i in 1:nY) {
-        Z.i <- Z[id == i, , drop = FALSE]
-        Vs[[i]] <- if (class(init.object) == "jointModel") { ## added from here (...)
-          secnd.deriv.ll.event.bi <- {
-            if (init.object$parameterization == "value") {
-              Zs.i <- Zs[which(i == idT.GK), , drop = FALSE]
-              Ws.intF.vl.alpha.i <- Ws.intF.vl.alpha[which(i == idT.GK)]
-              Zs.assoc.i <- Zs.i * Ws.intF.vl.alpha.i
-              spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
-              idT.GK.i <- id.GK[i == idT.GK]
-              spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
-                                                    function(x) tcrossprod(x)), idT.GK.i)
-              spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
-              spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
-                                     spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
-              spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
-                mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
-                function(x) Reduce('+', x))
-              Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
+      if (b.postVar.opt == TRUE)
+        Vs <- b.postVar
+      else {
+        Vs <- vector("list", nY)
+        inv.VC <- solve(VC)
+        if (class(init.object) == "jointModel") {
+          idT.GK <- rep(idT, each = init.object$control$GKk)
+          eta.yx <- as.vector(X %*% init$betas)
+          eta.tw1 <- if (!is.null(W)) 
+            as.vector(W %*% init$gammas)
+          else rep(0, length(init.object$y$logT))
+          eta.tw2 <- as.vector(W2 %*% init$gammas.bs)
+          eta.ws <- as.vector(init.object$x$W2s %*% init$gammas.bs)
+          if (parameterization %in% c("value", "both")) {
+            Y <- as.vector(Xtime %*% init$betas + init.object$EB$Ztimeb)
+            Ys <- as.vector(init.object$x$Xs %*% init$betas + rowSums(init.object$x$Zs * b[idT.GK, ]))
+            eta.t <- {
+              if (is.null(transform.value))
+                eta.tw2 + eta.tw1 + c(WintF.vl %*% init$alpha) * Y
+              else eta.tw2 + eta.tw1 + c(WintF.vl %*% init$alpha) * transform.value(Y)
             }
-            else if (init.object$parameterization == "slope") {
-              Zs.deriv.full.i <- Zs.deriv.full[which(i == idT.GK), , drop = FALSE]
-              Ws.intF.sl.Dalpha.i <- Ws.intF.sl.Dalpha[which(i == idT.GK)]
-              Zs.assoc.i <- Zs.deriv.full.i * Ws.intF.sl.Dalpha.i
-              spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
-              idT.GK.i <- id.GK[i == idT.GK]
-              spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
-                                                    function(x) tcrossprod(x)), idT.GK.i)
-              spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
-              spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
-                                     spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
-              spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
-                mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
-                function(x) Reduce('+', x))
-              Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
-            }
-            else if (init.object$parameterization == "both") {
-              Zs.i <- Zs[which(i == idT.GK), , drop = FALSE]
-              Zs.deriv.full.i <- Zs.deriv.full[which(i == idT.GK), , drop = FALSE]
-              Ws.intF.vl.alpha.i <- Ws.intF.vl.alpha[which(i == idT.GK)]
-              Ws.intF.sl.Dalpha.i <- Ws.intF.sl.Dalpha[which(i == idT.GK)]
-              Zs.assoc.i <- Zs.i * Ws.intF.vl.alpha.i + Zs.deriv.full.i * Ws.intF.sl.Dalpha.i
-              spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
-              idT.GK.i <- id.GK[i == idT.GK]
-              spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
-                                                    function(x) tcrossprod(x)), idT.GK.i)
-              spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
-              spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
-                                     spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
-              spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
-                mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
-                function(x) Reduce('+', x))
-              Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
+            eta.s <- {
+              if (is.null(transform.value))
+                c(init.object$x$Ws.intF.vl %*% init$alpha) * Ys
+              else c(init.object$x$Ws.intF.vl %*% init$alpha) * transform.value(Ys)
             }
           }
-          solve(crossprod(Z.i)/init$sigma^2 + inv.VC + secnd.deriv.ll.event.bi) ## (...) to here
+          if (parameterization %in% c("slope", "both")) {
+            Y.deriv <- as.vector(Xtime.deriv %*% init$betas[init.object$derivForm$indFixed]) +
+              if (length(init.object$derivForm$indRandom) > 1) init.object$EB$Ztimeb.deriv
+            else 0
+            Ys.deriv <- as.vector(init.object$x$Xs.deriv %*% init$betas[init.object$derivForm$indFixed]) +
+              if (length(init.object$derivForm$indRandom) > 1) 
+                as.vector(rowSums(init.object$x$Zs.deriv * b[idT.GK, init.object$derivForm$indRandom, drop = FALSE]))
+            else 0
+            eta.t <- if (parameterization %in% "both") 
+              eta.t + c(init.object$x$WintF.sl %*% init$Dalpha) * Y.deriv
+            else eta.tw2 + eta.tw1 + c(init.object$x$WintF.sl %*% init$Dalpha) * Y.deriv
+            eta.s <- if (parameterization %in% "both") 
+              eta.s + c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
+            else c(init.object$x$Ws.intF.sl %*% init$Dalpha) * Ys.deriv
+          }
+          if (parameterization %in% c("value", "both"))
+            Ws.intF.vl.alph <- c(init.object$x$Ws.intF.vl %*% init$alpha)
+          if (parameterization %in% c("slope", "both"))
+            Ws.intF.sl.alph <- c(init.object$x$Ws.intF.sl %*% init$Dalpha)
+          Zs.deriv.full <- matrix(0, nrow(init.object$x$Zs), ncol(init.object$x$Zs))
+          Zs.deriv.full[ , init.object$derivForm$indRandom] <- init.object$x$Zs.deriv
         }
-        else solve(crossprod(Z.i)/lmeObject$sigma^2 + inv.VC)
+        if (is.null(transform.value)) {
+          for (i in 1:nY) {
+            Z.i <- Z[id == i, , drop = FALSE]
+            Vs[[i]] <- if (class(init.object) == "jointModel") {
+              H.tb <- {
+                if (init.object$parameterization == "value") {
+                  Zs.i <- Zs[which(i == idT.GK), , drop = FALSE]
+                  Ws.intF.vl.alph.i <- Ws.intF.vl.alph[which(i == idT.GK)]
+                  Zs.assoc.i <- Zs.i * Ws.intF.vl.alph.i
+                  spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
+                  idT.GK.i <- id.GK[i == idT.GK]
+                  spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
+                                                        function(x) tcrossprod(x)), idT.GK.i)
+                  spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
+                  spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
+                                         spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
+                  spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
+                    mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
+                    function(x) Reduce('+', x))
+                  Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
+                }
+                else if (init.object$parameterization == "slope") {
+                  Zs.deriv.full.i <- Zs.deriv.full[which(i == idT.GK), , drop = FALSE]
+                  Ws.intF.sl.alph.i <- Ws.intF.sl.alph[which(i == idT.GK)]
+                  Zs.assoc.i <- Zs.deriv.full.i * Ws.intF.sl.alph.i
+                  spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
+                  idT.GK.i <- id.GK[i == idT.GK]
+                  spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
+                                                        function(x) tcrossprod(x)), idT.GK.i)
+                  spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
+                  spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
+                                         spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
+                  spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
+                    mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
+                    function(x) Reduce('+', x))
+                  Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
+                }
+                else if (init.object$parameterization == "both") {
+                  Zs.i <- Zs[which(i == idT.GK), , drop = FALSE]
+                  Zs.deriv.full.i <- Zs.deriv.full[which(i == idT.GK), , drop = FALSE]
+                  Ws.intF.vl.alph.i <- Ws.intF.vl.alph[which(i == idT.GK)]
+                  Ws.intF.sl.alph.i <- Ws.intF.sl.alph[which(i == idT.GK)]
+                  Zs.assoc.i <- Zs.i * Ws.intF.vl.alph.i + Zs.deriv.full.i * Ws.intF.sl.alph.i
+                  spl.exp.eta.tw1.P.i <- split(exp(eta.tw1[idT==i]) * P[idT==i], seq_len(sum(idT==i)))
+                  idT.GK.i <- id.GK[i == idT.GK]
+                  spl.crprod.Zs.assoc.i <- split(lapply(split(Zs.assoc.i, seq_len(nrow(Zs.i))),
+                                                        function(x) tcrossprod(x)), idT.GK.i)
+                  spl.exp.eta.ws.s.i <- split(exp(eta.ws[which(i == idT.GK)] + eta.s[which(i == idT.GK)]), idT.GK.i)
+                  spl.res.GK.i <- mapply(function(x, y) mapply(function(x,y) x * y, x, y, SIMPLIFY = F),
+                                         spl.exp.eta.ws.s.i, spl.crprod.Zs.assoc.i, SIMPLIFY = F)
+                  spl.res.i <- lapply(lapply(spl.res.GK.i, function(x)
+                    mapply(function(y, z) y * z, x, split(wk, seq_len(init.object$control$GKk)), SIMPLIFY = F)),
+                    function(x) Reduce('+', x))
+                  Reduce('+', mapply(function(x, y) x * y, spl.exp.eta.tw1.P.i, spl.res.i, SIMPLIFY = F))
+                }
+              }
+              solve(crossprod(Z.i)/init$sigma^2 + inv.VC + H.tb)
+            }
+            else solve(crossprod(Z.i)/lmeObject$sigma^2 + inv.VC)
+          }
+        }
+        else {
+          if (class(init.object) != "jointModel"){
+            for(i in 1:nY) {
+              Z.i <- Z[id == i, , drop = FALSE]
+              Vs[[i]] <- solve(crossprod(Z.i)/lmeObject$sigma^2 + inv.VC)
+            }
+          }
+          else {
+            exp.eta.tw.P <- exp(eta.tw1) * P
+            Int <- wk * exp(eta.ws + eta.s)
+            H.tb <- array(0, dim = c(nY, ncz, ncz))
+            for (i in 1:ncz) {
+              for (j in i:ncz) {
+                ZZ <- if (parameterization == "value") {
+                  to.add <- d * c(WintF.vl %*% init$alpha) * H.transform.value(Ztime[, i], Ztime[, j], Y)
+                  Ws.intF.vl.alph * H.transform.value(Zs[, i], Zs[, j], Ys) +
+                    Ws.intF.vl.alph^2 * gr.transform.value(Xs[, i], Ys) * gr.transform.value(Xs[, j], Ys)
+                }
+                else if (parameterization == "slope") {
+                  if (i %in% init.object$derivForm$indRandom && j %in% init.object$derivForm$indRandom) {
+                    ii <- match(i, init.object$derivForm$indRandom)
+                    jj <- match(j, init.object$derivForm$indRandom)
+                    Ws.intF.sl.alph^2 * Zs.deriv[, ii] * Zs.deriv[, jj]
+                  }
+                  else 0
+                }
+                else {
+                  if (i %in% init.object$derivForm$indRandom && j %in% init.object$derivForm$indRandom) {
+                    ii <- match(i, init.object$derivForm$indRandom)
+                    jj <- match(j, init.object$derivForm$indRandom)
+                    to.add <- d * c(WintF.vl %*% init$alpha) * H.transform.value(Ztime[, i], Ztime[, j], Y)
+                    Ws.intF.vl.alph * H.transform.value(Zs[, i], Zs[, j], Ys) +
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, i], Ys) + Ws.intF.sl.alph * Zs.deriv[, ii]) *
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, j], Ys) + Ws.intF.sl.alph * Zs.deriv[, jj])
+                  }
+                  else if (i %in% init.object$derivForm$indRandom && !j %in% init.object$derivForm$indRandom) {
+                    ii <- match(i, init.object$derivForm$indRandom)
+                    to.add <- d * c(WintF.vl %*% init$alpha) * H.transform.value(Ztime[, i], Ztime[, j], Y)
+                    Ws.intF.vl.alph * H.transform.value(Zs[, i], Zs[, j], Ys) +
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, i], Ys) + Ws.intF.sl.alph * Zs.deriv[, ii]) *
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, j], Ys))
+                  }
+                  else if (!i %in% init.object$derivForm$indRandom && j %in% init.object$derivForm$indRandom) {
+                    jj <- match(j, init.object$derivForm$indRandom)
+                    to.add <- d * c(WintF.vl %*% init$alpha) * H.transform.value(Ztime[, i], Ztime[, j], Y)
+                    Ws.intF.vl.alph * H.transform.value(Zs[, i], Zs[, j], Ys) +
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, i], Ys)) *
+                      (Ws.intF.vl.alph * gr.transform.value(Zs[, j], Ys) + Ws.intF.sl.alph * Zs.deriv[, jj])
+                  }
+                  else {
+                    to.add <- d * c(WintF.vl %*% init$alpha) * H.transform.value(Ztime[, i], Ztime[, j], Y)
+                    Ws.intF.vl.alph * H.transform.value(Zs[, i], Zs[, j], Ys) +
+                      Ws.intF.vl.alph^2 * gr.transform.value(Zs[, i], Ys) * gr.transform.value(Zs[, j], Ys)
+                  }
+                }
+                ki <- exp.eta.tw.P * rowsum(Int * ZZ, id.GK, reorder = FALSE)
+                H.tb[, i, j] <- as.vector(rowsum( ki - to.add, idT, reorder = FALSE))
+              }
+            }
+            for(i in 1:nY) {
+              H.tb[i, , ][lower.tri(H.tb[i, , ])] <- t(H.tb[i, , ])[lower.tri(H.tb[i, , ])]
+              Z.i <- Z[id == i, , drop = FALSE]
+              Vs[[i]] <- solve(crossprod(Z.i)/init$sigma^2 + inv.VC + H.tb[i, , ])
+            }
+          }
+        } 
       }
-      con$inv.chol.VCs <- lapply(Vs, function(x) solve(chol(solve(x))))
+      con$inv.chol.VCs <- try(lapply(Vs, function(x) solve(chol(solve(x)))), TRUE)
       con$det.inv.chol.VCs <- sapply(con$inv.chol.VCs, det)
     }
     con$inv.chol.VC <- solve(chol(solve(VC)))
@@ -580,15 +681,16 @@ JMstateModel <-
     con$ranef <- b
     if (all(VC[upper.tri(VC)] == 0)) 
       VC <- diag(VC)
-    if (class(init.object) != "jointModel") { ## added
-      init.surv <- JM:::initial.surv(Time, d, W, WintF.vl, WintF.sl, 
-                                     id, times = data[[timeVar]], method, parameterization, 
-                                     long = long, long.deriv = long.deriv, 
-                                     extra = list(W2 = x$W2, control = con, ii = idT, strata = survObject$strata), 
-                                     LongFormat = CompRisk | Mstate | length(Time) > nT) # added
+    if (class(init.object) != "jointModel") {
+      init.surv <- initial.surv(Time, d, W, WintF.vl, WintF.sl,
+                                id, times = data[[timeVar]], method, parameterization, 
+                                long = long, long.deriv = long.deriv, 
+                                extra = list(W2 = x$W2, control = con, ii = idT, strata = survObject$strata), 
+                                LongFormat = CompRisk | Mstate | length(Time) > nT,
+                                transform.value = transform.value)
       
       if (method == "Cox-PH-GH" && length(init.surv$lambda0) < 
-            length(unqT)) 
+          length(unqT)) 
         init.surv$lambda0 <- basehaz(survObject)$hazard
       initial.values <- c(list(betas = fixef(lmeObject), sigma = lmeObject$sigma, D = VC), init.surv)
       if (!is.null(init)) {
@@ -601,8 +703,8 @@ JMstateModel <-
           initial.values[nams1] <- init
         }
       }
-    } ## added
-    else initial.values <- init ## added
+    }
+    else initial.values <- init
     rmObjs <- c(names(x), "y.long", "mfX", "mfZ", "data.id2")
     rm(list = rmObjs)
     gc()
@@ -611,7 +713,7 @@ JMstateModel <-
                   `weibull-AFT-GH` = JM:::weibullAFTGH.fit(x, y, id, initial.values, scaleWB, parameterization, derivForm, con),
                   `weibull-PH-GH` = JM:::weibullPHGH.fit(x, y, id, initial.values, scaleWB, parameterization, derivForm, con),
                   `piecewise-PH-GH` = JM:::piecewisePHGH.fit(x, y, id, initial.values, parameterization, derivForm, con), 
-                  `spline-PH-GH` = JM:::splinePHGH.fit(x, y, id, initial.values, parameterization, derivForm, con),
+                  `spline-PH-GH` = splinePHGH.fit(x, y, id, initial.values, parameterization, derivForm, con, transform.value),
                   `ch-Laplace` = JM:::chLaplace.fit(x, y, id, initial.values, b, parameterization, derivForm, con))
     H <- out$Hessian
     if (any(is.na(H) | !is.finite(H))) {
@@ -645,9 +747,12 @@ JMstateModel <-
     out$derivForm <- derivForm
     out$interFact <- interFact
     out$CompRisk <- CompRisk
-    out$Mstate <- Mstate # added
-    out$data.Mstate <- data.Mstate # added
-    out$ID.Mstate <- data.Mstate[, ID.Mstate] # added
+    out$Mstate <- Mstate
+    out$data.Mstate <- data.Mstate
+    out$ID.Mstate <- data.Mstate[, ID.Mstate]
+    out$transform.value <- transform.value
+    out$gr.transform.value <- gr.transform.value
+    out$H.transform.value <- H.transform.value
     out$LongFormat <- LongFormat
     out$assignY <- attr(lmeObject$fixDF, "assign")[-1]
     out$assignT <- survObject$assign
@@ -655,3 +760,4 @@ JMstateModel <-
     class(out) <- "jointModel"
     out
   }
+
